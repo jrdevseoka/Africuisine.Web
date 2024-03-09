@@ -1,0 +1,75 @@
+name: Develop to Release Workflow
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '14'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Get Current Version
+        id: get_version
+        run: echo "::set-output name=VERSION::$(node -pe 'require("./package.json").version')"
+
+      - name: Determine Version Bump
+        id: version_bump
+        run: |
+          VERSION=$1
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+
+          if [ "$MINOR" -eq 9 ] && [ "$PATCH" -eq 0 ]; then
+            NEXT_VERSION="$((MAJOR + 1)).0.0"
+          elif [ "$PATCH" -eq 9 ]; then
+            NEXT_VERSION="$MAJOR.$((MINOR + 1)).0"
+          else
+            NEXT_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          fi
+          echo "::set-output name=NEXT_VERSION::$NEXT_VERSION"
+
+      - name: Bump Version
+        run: |
+          NEXT_VERSION=${{ steps.version_bump.outputs.NEXT_VERSION }}
+          npm version $NEXT_VERSION --allow-same-version
+          git tag -a $NEXT_VERSION -m "Version $NEXT_VERSION"
+          git push origin $NEXT_VERSION
+
+  deploy-to-release:
+    needs: bump-version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build for Production
+        run: ng build --prod
+
+      - name: Deploy to Firebase
+        run: |
+          npm install -g firebase-tools
+          firebase use africuisine-release --token $FIREBASE_TOKEN
+          firebase deploy --token $FIREBASE_TOKEN
